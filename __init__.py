@@ -13,7 +13,7 @@ from .utilities import *
 
 bl_info = {
     "name": "Ollama Blender Assistant",
-    "blender": (2, 82, 0),
+    "blender": (4, 0, 0),
     "category": "Object",
     "author": "Aarya (@gd3kr)",
     "version": (2, 0, 0),
@@ -54,19 +54,19 @@ for c in range(0,count):
 
 
 
-class GPT4_OT_DeleteMessage(bpy.types.Operator):
-    bl_idname = "gpt4.delete_message"
+class OLLAMA_OT_DeleteMessage(bpy.types.Operator):
+    bl_idname = "ollama.delete_message"
     bl_label = "Delete Message"
     bl_options = {'REGISTER', 'UNDO'}
 
     message_index: bpy.props.IntProperty()
 
     def execute(self, context):
-        context.scene.gpt4_chat_history.remove(self.message_index)
+        context.scene.ollama_chat_history.remove(self.message_index)
         return {'FINISHED'}
 
-class GPT4_OT_ShowCode(bpy.types.Operator):
-    bl_idname = "gpt4.show_code"
+class OLLAMA_OT_ShowCode(bpy.types.Operator):
+    bl_idname = "ollama.show_code"
     bl_label = "Show Code"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -77,7 +77,7 @@ class GPT4_OT_ShowCode(bpy.types.Operator):
     )
 
     def execute(self, context):
-        text_name = "GPT4_Generated_Code.py"
+        text_name = "Ollama_Generated_Code.py"
         text = bpy.data.texts.get(text_name)
         if text is None:
             text = bpy.data.texts.new(text_name)
@@ -98,9 +98,9 @@ class GPT4_OT_ShowCode(bpy.types.Operator):
 
         return {'FINISHED'}
 
-class GPT4_PT_Panel(bpy.types.Panel):
+class OLLAMA_PT_Panel(bpy.types.Panel):
     bl_label = "Ollama Blender Assistant"
-    bl_idname = "GPT4_PT_Panel"
+    bl_idname = "OLLAMA_PT_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'Ollama Assistant'
@@ -111,45 +111,45 @@ class GPT4_PT_Panel(bpy.types.Panel):
 
         column.label(text="Chat history:")
         box = column.box()
-        for index, message in enumerate(context.scene.gpt4_chat_history):
+        for index, message in enumerate(context.scene.ollama_chat_history):
             if message.type == 'assistant':
                 row = box.row()
                 row.label(text="Assistant: ")
-                show_code_op = row.operator("gpt4.show_code", text="Show Code")
+                show_code_op = row.operator("ollama.show_code", text="Show Code")
                 show_code_op.code = message.content
-                delete_message_op = row.operator("gpt4.delete_message", text="", icon="TRASH", emboss=False)
+                delete_message_op = row.operator("ollama.delete_message", text="", icon="TRASH", emboss=False)
                 delete_message_op.message_index = index
             else:
                 row = box.row()
                 row.label(text=f"User: {message.content}")
-                delete_message_op = row.operator("gpt4.delete_message", text="", icon="TRASH", emboss=False)
+                delete_message_op = row.operator("ollama.delete_message", text="", icon="TRASH", emboss=False)
                 delete_message_op.message_index = index
 
         column.separator()
         
-        column.label(text="GPT Model (Ignored, using local Ollama):")
-        column.prop(context.scene, "gpt4_model", text="")
+        column.label(text="Ollama Model:")
+        column.prop(context.scene, "ollama_model", text="")
 
         column.label(text="Enter your message:")
-        column.prop(context.scene, "gpt4_chat_input", text="")
-        button_label = "Please wait...(this might take some time)" if context.scene.gpt4_button_pressed else "Execute"
+        column.prop(context.scene, "ollama_chat_input", text="")
+        button_label = "Please wait...(this might take some time)" if context.scene.ollama_button_pressed else "Execute"
         row = column.row(align=True)
-        row.operator("gpt4.send_message", text=button_label)
-        row.operator("gpt4.clear_chat", text="Clear Chat")
+        row.operator("ollama.send_message", text=button_label)
+        row.operator("ollama.clear_chat", text="Clear Chat")
 
         column.separator()
 
-class GPT4_OT_ClearChat(bpy.types.Operator):
-    bl_idname = "gpt4.clear_chat"
+class OLLAMA_OT_ClearChat(bpy.types.Operator):
+    bl_idname = "ollama.clear_chat"
     bl_label = "Clear Chat"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        context.scene.gpt4_chat_history.clear()
+        context.scene.ollama_chat_history.clear()
         return {'FINISHED'}
 
-class GPT4_OT_Execute(bpy.types.Operator):
-    bl_idname = "gpt4.send_message"
+class OLLAMA_OT_Execute(bpy.types.Operator):
+    bl_idname = "ollama.send_message"
     bl_label = "Send Message"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -160,74 +160,75 @@ class GPT4_OT_Execute(bpy.types.Operator):
     )
 
     def execute(self, context):
-        context.scene.gpt4_button_pressed = True
+        self.report({'INFO'}, "Running...")
+        context.scene.ollama_button_pressed = True
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
         
         blender_code = generate_blender_code(
-            context.scene.gpt4_chat_input,
-            context.scene.gpt4_chat_history,
+            context.scene.ollama_chat_input,
+            context.scene.ollama_chat_history,
             context,
-            system_prompt
+            system_prompt,
+            self
         )
 
         # Add the user message to the chat history.
-        message = context.scene.gpt4_chat_history.add()
+        message = context.scene.ollama_chat_history.add()
         message.type = 'user'
-        message.content = context.scene.gpt4_chat_input
+        message.content = context.scene.ollama_chat_input
 
         # Clear the chat input field.
-        context.scene.gpt4_chat_input = ""
-
+        context.scene.ollama_chat_input = ""
+        
         if blender_code:
-            message = context.scene.gpt4_chat_history.add()
+            message = context.scene.ollama_chat_history.add()
             message.type = 'assistant'
             message.content = blender_code
 
-            # Prepare a copy of the current globals and execute the code.
+            # Execute the generated code using a copy of the current globals.
             global_namespace = globals().copy()
             try:
                 exec(blender_code, global_namespace)
             except Exception as e:
                 self.report({'ERROR'}, f"Error executing generated code: {e}")
-                context.scene.gpt4_button_pressed = False
+                context.scene.ollama_button_pressed = False
                 return {'CANCELLED'}
         else:
             self.report({'ERROR'}, "No code was generated!")
-            context.scene.gpt4_button_pressed = False
+            context.scene.ollama_button_pressed = False
             return {'CANCELLED'}
 
-        context.scene.gpt4_button_pressed = False
+        context.scene.ollama_button_pressed = False
         return {'FINISHED'}
 
 def menu_func(self, context):
-    self.layout.operator(GPT4_OT_Execute.bl_idname)
+    self.layout.operator(OLLAMA_OT_Execute.bl_idname)
 
-class GPT4AddonPreferences(bpy.types.AddonPreferences):
+class OllamaAddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
 
-    # No API key is needed for local Ollama usage.
     def draw(self, context):
         layout = self.layout
         layout.label(text="No API key required for local Ollama usage.")
 
 def register():
-    bpy.utils.register_class(GPT4AddonPreferences)
-    bpy.utils.register_class(GPT4_OT_Execute)
-    bpy.utils.register_class(GPT4_PT_Panel)
-    bpy.utils.register_class(GPT4_OT_ClearChat)
-    bpy.utils.register_class(GPT4_OT_ShowCode)
-    bpy.utils.register_class(GPT4_OT_DeleteMessage)
+    bpy.utils.register_class(OllamaAddonPreferences)
+    bpy.utils.register_class(OLLAMA_OT_Execute)
+    bpy.utils.register_class(OLLAMA_PT_Panel)
+    bpy.utils.register_class(OLLAMA_OT_ClearChat)
+    bpy.utils.register_class(OLLAMA_OT_ShowCode)
+    bpy.utils.register_class(OLLAMA_OT_DeleteMessage)
 
     bpy.types.VIEW3D_MT_mesh_add.append(menu_func)
     init_props()
 
 def unregister():
-    bpy.utils.unregister_class(GPT4AddonPreferences)
-    bpy.utils.unregister_class(GPT4_OT_Execute)
-    bpy.utils.unregister_class(GPT4_PT_Panel)
-    bpy.utils.unregister_class(GPT4_OT_ClearChat)
-    bpy.utils.unregister_class(GPT4_OT_ShowCode)
-    bpy.utils.unregister_class(GPT4_OT_DeleteMessage)
+    bpy.utils.unregister_class(OllamaAddonPreferences)
+    bpy.utils.unregister_class(OLLAMA_OT_Execute)
+    bpy.utils.unregister_class(OLLAMA_PT_Panel)
+    bpy.utils.unregister_class(OLLAMA_OT_ClearChat)
+    bpy.utils.unregister_class(OLLAMA_OT_ShowCode)
+    bpy.utils.unregister_class(OLLAMA_OT_DeleteMessage)
 
     bpy.types.VIEW3D_MT_mesh_add.remove(menu_func)
     clear_props()

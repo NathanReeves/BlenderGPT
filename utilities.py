@@ -6,77 +6,130 @@ import json
 import requests
 
 def init_props():
-    bpy.types.Scene.gpt4_chat_history = bpy.props.CollectionProperty(type=bpy.types.PropertyGroup)
-    bpy.types.Scene.gpt4_model = bpy.props.EnumProperty(
-        name="GPT Model",
-        description="Select the GPT model to use (Ignored in Ollama mode, defaulting to llama3.2b)",
+    # First, create a custom PropertyGroup class
+    class OllamaChatMessage(bpy.types.PropertyGroup):
+        type: bpy.props.StringProperty()
+        content: bpy.props.StringProperty()
+    
+    # Register the class
+    bpy.utils.register_class(OllamaChatMessage)
+    
+    # Add model selector
+    bpy.types.Scene.ollama_model = bpy.props.EnumProperty(
+        name="Ollama Model",
+        description="Select the Ollama model to use",
         items=[
-            ("gpt-4", "GPT-4 (powerful, expensive)", "Use GPT-4"),
-            ("gpt-3.5-turbo", "GPT-3.5 Turbo (less powerful, cheaper)", "Use GPT-3.5 Turbo"),
-            ("o1-mini", "o1-mini (Advanced Reasoning)", "Use OpenAI's o1-mini model")
+            ("qwen2.5-coder:32b", "Qwen 2.5 Coder (32B)", "Use Qwen 2.5 Coder model"),
+            ("codellama:34b", "CodeLlama (34B)", "Use CodeLlama model"),
+            ("deepseek-coder:33b", "DeepSeek Coder (33B)", "Use DeepSeek Coder model")
         ],
-        default="gpt-4",
+        default="qwen2.5-coder:32b",
     )
-    bpy.types.Scene.gpt4_chat_input = bpy.props.StringProperty(
+    
+    # Then use it in the collection property
+    bpy.types.Scene.ollama_chat_history = bpy.props.CollectionProperty(type=OllamaChatMessage)
+    bpy.types.Scene.ollama_chat_input = bpy.props.StringProperty(
         name="Message",
         description="Enter your message",
         default="",
     )
-    bpy.types.Scene.gpt4_button_pressed = bpy.props.BoolProperty(default=False)
-    bpy.types.PropertyGroup.type = bpy.props.StringProperty()
-    bpy.types.PropertyGroup.content = bpy.props.StringProperty()
+    bpy.types.Scene.ollama_button_pressed = bpy.props.BoolProperty(default=False)
 
 def clear_props():
-    del bpy.types.Scene.gpt4_chat_history
-    del bpy.types.Scene.gpt4_chat_input
-    del bpy.types.Scene.gpt4_button_pressed
+    # Unregister the class when clearing props
+    bpy.utils.unregister_class(bpy.types.OllamaChatMessage)
+    del bpy.types.Scene.ollama_chat_history
+    del bpy.types.Scene.ollama_chat_input
+    del bpy.types.Scene.ollama_button_pressed
+    del bpy.types.Scene.ollama_model
 
-def generate_blender_code(prompt, chat_history, context, system_prompt):
-    # Build the conversation prompt from the system prompt and chat history.
+def generate_blender_code(prompt, chat_history, context, system_prompt, operator=None):
+    # Get the selected model
+    model_name = context.scene.ollama_model
+
+    # Build the conversation prompt from the system prompt and chat history
     conversation = system_prompt + "\n\n"
     for message in chat_history[-10:]:
         if message.type == "assistant":
             conversation += "Assistant:\n" + message.content + "\n\n"
         else:
             conversation += "User:\n" + message.content + "\n\n"
-    conversation += "User: Can you please write Blender code for me that accomplishes the following task: " + prompt + "?\n"
+    conversation += "You are an expert in Blender's Python API. Please write Blender code that accomplishes the following task: " + prompt + "? \n. Do not respond with anything that is not Python code. Do not provide explanations"
     conversation += "Assistant:\n"
 
-    # Set up the Ollama API request (adjust the URL if necessary).
+    # Set up the Ollama API request
     url = "http://localhost:11434/api/generate"
     payload = {
-         "model": "llama3.2b",  # Hard-coded for now; you could map context.scene.gpt4_model if needed.
-         "prompt": conversation,
-         "max_tokens": 1500,
-         "stream": True
+        "model": model_name,
+        "prompt": conversation,
+        "stream": False
     }
-    try:
-        response = requests.post(url, json=payload, stream=True)
-        response.raise_for_status()
-    except Exception as e:
-        print("Error contacting Ollama API:", e)
-        return None
 
-    completion_text = ""
     try:
-        # Process the streamed response line-by-line.
-        for line in response.iter_lines():
-            if line:
-                decoded_line = line.decode('utf-8')
-                data = json.loads(decoded_line)
-                text_chunk = data.get("text", "")
-                completion_text += text_chunk
-                print(completion_text, flush=True, end='\r')
-        # Try to extract code enclosed in markdown code blocks.
-        matches = re.findall(r'```(.*?)```', completion_text, re.DOTALL)
+        if operator:
+            operator.report({'INFO'}, "=== Debug Information ===")
+            operator.report({'INFO'}, f"URL: {url}")
+            operator.report({'INFO'}, f"Headers: {{'Content-Type': 'application/json'}}")
+            operator.report({'INFO'}, f"Full payload: {json.dumps(payload, indent=2)}")
+        
+        # Explicitly set the Content-Type header
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if operator:
+            operator.report({'INFO'}, f"Response status: {response.status_code}")
+            operator.report({'INFO'}, f"Response text: {response.text[:200]}")  # First 200 chars
+        
+        response.raise_for_status()
+        
+        # Parse the JSON response and log it
+        response_data = response.json()
+        if operator:
+            operator.report({'INFO'}, f"Raw response: {response_data}")
+        
+        completion_text = response_data.get("response", "")
+        if operator:
+            operator.report({'INFO'}, f"Completion text: {completion_text[:100]}...")  # First 100 chars
+        
+        # Try to extract code enclosed in markdown code blocks
+        matches = re.findall(r'```(?:python)?(.*?)```', completion_text, re.DOTALL)
         if matches:
-            code = matches[0]
+            code = matches[0].strip()
+            if operator:
+                operator.report({'INFO'}, f"Found code block: {code[:100]}...")
         else:
-            code = completion_text
-        code = re.sub(r'^python', '', code, flags=re.MULTILINE)
+            code = completion_text.strip()
+            if operator:
+                operator.report({'INFO'}, "No code blocks found in response")
+                operator.report({'INFO'}, f"Using raw text: {code[:100]}...")
+            
+        # Remove any "python" language identifier if present
+        code = re.sub(r'^python\n', '', code, flags=re.MULTILINE)
+        
+        if not code:
+            if operator:
+                operator.report({'ERROR'}, "Generated code is empty")
+            return None
+            
         return code
+
+    except requests.exceptions.RequestException as e:
+        if operator:
+            operator.report({'ERROR'}, f"Network error: {str(e)}")
+        else:
+            print(f"Network error: {str(e)}")  # Fallback for when operator is None
+        return None
+    except json.JSONDecodeError as e:
+        if operator:
+            operator.report({'ERROR'}, f"JSON parsing error: {str(e)}")
+        else:
+            print(f"JSON parsing error: {str(e)}")
+        return None
     except Exception as e:
-        print("Error processing Ollama response:", e)
+        if operator:
+            operator.report({'ERROR'}, f"Unexpected error: {str(e)}")
+        else:
+            print(f"Unexpected error: {str(e)}")
         return None
 
 def split_area_to_text_editor(context):
