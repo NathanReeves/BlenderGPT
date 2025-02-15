@@ -39,3 +39,24 @@ Access to GPT-4 in this addon can ONLY be obtained through the OpenAI waitlist (
 
 ## Demonstration
 https://user-images.githubusercontent.com/63528145/227158577-d92c6e8d-df21-4461-a69b-9e7cde8c8dcf.mov
+
+
+# For easy modifications to add-on code:
+
+Checkout git repo:
+git clone https://github.com/nathanreeves/BlenderGPT.git
+
+Find Blender add-ons folder
+On Mac:
+```bash
+~/Library/Application Support/Blender/<version>/scripts/addons
+```
+
+Link Blender add ons to repo:
+```bash
+ln -s "{PATH_TO_REPO}" "{PATH_TO_BLENDER_ADD_ONS}/BlenderGPT"
+```
+
+Open Blender
+Press F8 to reload scripts -OR- run `bpy.ops.script.reload()` in console
+
