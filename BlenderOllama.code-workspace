@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../blender_api_rag"
+		}
+	],
+	"settings": {}
+}

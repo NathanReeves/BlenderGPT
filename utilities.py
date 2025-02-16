@@ -19,9 +19,9 @@ def init_props():
         name="Ollama Model",
         description="Select the Ollama model to use",
         items=[
-            ("qwen2.5-coder:32b", "Qwen 2.5 Coder (32B)", "Use Qwen 2.5 Coder model"),
-            ("codellama:34b", "CodeLlama (34B)", "Use CodeLlama model"),
-            ("deepseek-coder:33b", "DeepSeek Coder (33B)", "Use DeepSeek Coder model")
+            ("qwen2.5-coder:32b", "Qwen 2.5 Coder (32B)", "Use Qwen 2.5 Coder"),
+            ("llama3.2:3b", "Llama 3.2 (3B)", "Use Llama 3.2"),
+            ("deepseek-r1:70b", "DeepSeek R1 70B", "Use DeepSeek R1 70B")
         ],
         default="qwen2.5-coder:32b",
     )
@@ -43,28 +43,39 @@ def clear_props():
     del bpy.types.Scene.ollama_button_pressed
     del bpy.types.Scene.ollama_model
 
-def generate_blender_code(prompt, chat_history, context, system_prompt, operator=None):
-    # Get the selected model
+def generate_blender_code(prompt, chat_history, context, system_prompt, docs_context="", operator=None):
+    # Get the selected inference model
     model_name = context.scene.ollama_model
 
-    # Build the conversation prompt from the system prompt and chat history
+    # Build the conversation prompt from the system prompt, retrieved docs, and chat history.
     conversation = system_prompt + "\n\n"
+    if docs_context:
+        conversation += "=== EMBEDDED DOCUMENTATION ===\n"
+        conversation += docs_context + "\n"
+        conversation += "=== END EMBEDDED DOCUMENTATION ===\n\n"
+    
     for message in chat_history[-10:]:
         if message.type == "assistant":
             conversation += "Assistant:\n" + message.content + "\n\n"
         else:
             conversation += "User:\n" + message.content + "\n\n"
-    conversation += "You are an expert in Blender's Python API. Please write Blender code that accomplishes the following task: " + prompt + "? \n. Do not respond with anything that is not Python code. Do not provide explanations"
-    conversation += "Assistant:\n"
 
-    # Set up the Ollama API request
+    conversation += (
+        "You are an expert in Blender's Python API. Based on the embedded documentation above and the recent conversation, "
+        "please write Blender code that accomplishes the following task: " + prompt + "\n"
+        "Do not respond with anything that is not Python code. Do not provide explanations.\n"
+        "Important: Incorporate the embedded documentation if it is relevant to the task."
+    )
+    conversation += "\nAssistant:\n"
+    
+    # Set up the Ollama API request using the conversation as the prompt.
     url = "http://localhost:11434/api/generate"
     payload = {
         "model": model_name,
         "prompt": conversation,
         "stream": False
     }
-
+    
     try:
         if operator:
             operator.report({'INFO'}, "=== Debug Information ===")
@@ -72,7 +83,6 @@ def generate_blender_code(prompt, chat_history, context, system_prompt, operator
             operator.report({'INFO'}, f"Headers: {{'Content-Type': 'application/json'}}")
             operator.report({'INFO'}, f"Full payload: {json.dumps(payload, indent=2)}")
         
-        # Explicitly set the Content-Type header
         headers = {'Content-Type': 'application/json'}
         response = requests.post(url, json=payload, headers=headers)
         
@@ -82,7 +92,6 @@ def generate_blender_code(prompt, chat_history, context, system_prompt, operator
         
         response.raise_for_status()
         
-        # Parse the JSON response and log it
         response_data = response.json()
         if operator:
             operator.report({'INFO'}, f"Raw response: {response_data}")
@@ -91,7 +100,6 @@ def generate_blender_code(prompt, chat_history, context, system_prompt, operator
         if operator:
             operator.report({'INFO'}, f"Completion text: {completion_text[:100]}...")  # First 100 chars
         
-        # Try to extract code enclosed in markdown code blocks
         matches = re.findall(r'```(?:python)?(.*?)```', completion_text, re.DOTALL)
         if matches:
             code = matches[0].strip()
@@ -103,7 +111,6 @@ def generate_blender_code(prompt, chat_history, context, system_prompt, operator
                 operator.report({'INFO'}, "No code blocks found in response")
                 operator.report({'INFO'}, f"Using raw text: {code[:100]}...")
             
-        # Remove any "python" language identifier if present
         code = re.sub(r'^python\n', '', code, flags=re.MULTILINE)
         
         if not code:
@@ -117,7 +124,7 @@ def generate_blender_code(prompt, chat_history, context, system_prompt, operator
         if operator:
             operator.report({'ERROR'}, f"Network error: {str(e)}")
         else:
-            print(f"Network error: {str(e)}")  # Fallback for when operator is None
+            print(f"Network error: {str(e)}")
         return None
     except json.JSONDecodeError as e:
         if operator:

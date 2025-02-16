@@ -15,7 +15,7 @@ bl_info = {
     "name": "Ollama Blender Assistant",
     "blender": (4, 0, 0),
     "category": "Object",
-    "author": "Aarya (@gd3kr)",
+    "author": "Nathan Reeves, Aarya (@gd3kr)",
     "version": (2, 0, 0),
     "location": "3D View > UI > Ollama Blender Assistant",
     "description": "Generate Blender Python code using a local LLM via Ollama.",
@@ -153,48 +153,85 @@ class OLLAMA_OT_Execute(bpy.types.Operator):
     bl_label = "Send Message"
     bl_options = {'REGISTER', 'UNDO'}
 
-    natural_language_input: bpy.props.StringProperty(
-        name="Command",
-        description="Enter the natural language command",
-        default="",
-    )
-
     def execute(self, context):
         self.report({'INFO'}, "Running...")
         context.scene.ollama_button_pressed = True
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
-        
-        blender_code = generate_blender_code(
-            context.scene.ollama_chat_input,
-            context.scene.ollama_chat_history,
-            context,
-            system_prompt,
-            self
-        )
 
-        # Add the user message to the chat history.
-        message = context.scene.ollama_chat_history.add()
-        message.type = 'user'
-        message.content = context.scene.ollama_chat_input
-
-        # Clear the chat input field.
-        context.scene.ollama_chat_input = ""
+        # Make a request to the Ollama embeddings endpoint to get relevant documentation
+        url = "http://localhost:11434/api/embeddings"
+        headers = {'Content-Type': 'application/json'}
         
-        if blender_code:
+        # Get embeddings for the user's query
+        payload = {
+            "model": "nomic-embed-text",
+            "prompt": context.scene.ollama_chat_input
+        }
+        
+        try:
+            # Here you would normally do the RAG search, but for now let's use a simplified approach
+            # that just includes some basic documentation about the likely operations needed
+            docs_context = ""
+            query = context.scene.ollama_chat_input.lower()
+            
+            # Basic pattern matching to include relevant documentation
+            if "sphere" in query:
+                docs_context = (
+                    "bpy.ops.mesh.primitive_uv_sphere_add(radius=1.0, segments=32, ring_count=16, "
+                    "location=(0.0, 0.0, 0.0)): Adds a UV sphere mesh to the scene.\n"
+                    "Parameters:\n"
+                    "  radius: Sets the radius of the sphere\n"
+                    "  segments: Number of vertical segments\n"
+                    "  ring_count: Number of horizontal rings\n"
+                    "  location: Location of the sphere's center\n"
+                )
+            elif "cube" in query:
+                docs_context = (
+                    "bpy.ops.mesh.primitive_cube_add(size=2.0, location=(0.0, 0.0, 0.0)): "
+                    "Adds a cube mesh to the scene.\n"
+                    "Parameters:\n"
+                    "  size: Size of the cube\n"
+                    "  location: Location of the cube's center\n"
+                )
+            # Add more patterns as needed...
+
+            blender_code = generate_blender_code(
+                context.scene.ollama_chat_input,
+                context.scene.ollama_chat_history,
+                context,
+                system_prompt,
+                docs_context,
+                self
+            )
+
+            # Add the user message to the chat history
             message = context.scene.ollama_chat_history.add()
-            message.type = 'assistant'
-            message.content = blender_code
+            message.type = 'user'
+            message.content = context.scene.ollama_chat_input
 
-            # Execute the generated code using a copy of the current globals.
-            global_namespace = globals().copy()
-            try:
-                exec(blender_code, global_namespace)
-            except Exception as e:
-                self.report({'ERROR'}, f"Error executing generated code: {e}")
+            # Clear the chat input field
+            context.scene.ollama_chat_input = ""
+
+            if blender_code:
+                message = context.scene.ollama_chat_history.add()
+                message.type = 'assistant'
+                message.content = blender_code
+
+                # Execute the generated code using a copy of the current globals
+                global_namespace = globals().copy()
+                try:
+                    exec(blender_code, global_namespace)
+                except Exception as e:
+                    self.report({'ERROR'}, f"Error executing generated code: {e}")
+                    context.scene.ollama_button_pressed = False
+                    return {'CANCELLED'}
+            else:
+                self.report({'ERROR'}, "No code was generated!")
                 context.scene.ollama_button_pressed = False
                 return {'CANCELLED'}
-        else:
-            self.report({'ERROR'}, "No code was generated!")
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Error during execution: {str(e)}")
             context.scene.ollama_button_pressed = False
             return {'CANCELLED'}
 
